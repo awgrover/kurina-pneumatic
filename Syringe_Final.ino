@@ -3,6 +3,8 @@
   Reset button: retract and halt
   Start button: start push/pull patterns
 
+  Wiring: see associated fritzing
+  Switches are momentary, normally-open, close to ground
 
 */
 
@@ -15,11 +17,12 @@ const int stepPin = 3;
 const int dirPin = 4;
 const int motorInterfaceType = 1;
 
-const int startPin = 5; // momentary
-const int resetPin = 2; // momentary
+const int startPin = 5;
+const int resetPin = 2;
 
 const int retractLimitPin = 6; // momentary limit switch, when syringe fully retracted
 const int pushLimitPin = 7; // momentary limit switch, when syringe fully depressed
+const int debounceInterval = 50;
 
 //////////////// variables to be modified as you wish later on /////////
 const int MAXSPEED = 7000;
@@ -36,6 +39,8 @@ int maxPosition = 2400;      // when syringe fully depressed. initial value is a
 /////////////////////// end of variables////////////////
 
 Bounce startButton = Bounce();
+Bounce pushLimitButton = Bounce();
+Bounce retractLimitButton = Bounce();
 AccelStepper stepper = AccelStepper(motorInterfaceType, stepPin, dirPin);
 volatile bool isStarted = false;
 volatile bool isReset = false;
@@ -49,8 +54,8 @@ volatile int stepsTaken ;
 
 // sgn(number) gives -1,0,1
 template <typename T> int sgn(T val) {
-    return (T(0) < val) - (val < T(0));
-    }
+  return (T(0) < val) - (val < T(0));
+}
 
 void setup() {
   pinMode(startPin, INPUT_PULLUP);
@@ -62,8 +67,14 @@ void setup() {
 
   Serial.begin(9600);
 
+
   startButton.attach(startPin);
-  startButton.interval(50);
+  startButton.interval(debounceInterval);
+
+  pushLimitButton.attach(pushLimitPin);
+  startButton.interval(debounceInterval);
+  retractLimitButton.attach(retractLimitPin);
+  retractLimitButton.interval(debounceInterval);
 
   pinMode (stepPin, OUTPUT);
   pinMode (dirPin, OUTPUT);
@@ -76,10 +87,20 @@ void setup() {
   randomSeed(analogRead(0));
   stepsTaken = 0;
 
+  // Figure out position limits
+
   // run to both ends, which also sets the distance
   // in this order, because we set min to 0
+  Serial.println(F("Looking for min push limit..."));
+  stepper.setCurrentPosition( INT_MAX ); // so we can retract
   move_to( INT_MIN, MINSPEED, 0 ); // will figure out 0 for us, way farther negative than possible
+  Serial.print(F("min retract limit ")); Serial.println(stepper.currentPosition());
+
+  Serial.println(F("Looking for max push limit..."));
   move_to( INT_MAX, MINSPEED, 0 ); // will figure out maxPosition for us, way farther than possible
+  Serial.print(F("max push limit ")); Serial.println(stepper.currentPosition());
+
+  Serial.println(F("Waiting, press start."));
 }
 
 void ResetFunc() {
@@ -92,18 +113,19 @@ boolean hit_limit() {
   // update the start/end position values
   // Needs to be relatively fast because we are in the stepper loop
 
-  if ( digitalRead(retractLimitPin) ) 
+  pushLimitButton.update();
+  retractLimitButton.update();
+
+  if ( retractLimitButton.fell() )
   {
     stepper.setCurrentPosition(0);
-    ResetFunc(); // i.e. stop
     Serial.println(F("zeroed"));
     return true;
-    }
-  else if ( digitalRead(pushLimitPin) ) 
+  }
+  else if ( pushLimitButton.fell() )
   {
-    ResetFunc(); // i.e. stop
     maxPosition = stepper.currentPosition();
-    Serial.print(F("max pos"));Serial.println(maxPosition);
+    Serial.print(F("max pos ")); Serial.println(maxPosition);
     return true;
   }
   return false;
@@ -118,6 +140,7 @@ void loop() {
     // on push, mark started
     if (startButton.fell())
     {
+      Serial.print(F("Start from ")); Serial.println(stepper.currentPosition());
       isStarted = true;
     }
 
@@ -125,11 +148,15 @@ void loop() {
     else if (isReset)
     {
       isReset = false;
+      isStarted = false;
 
       // retract
-      move_to(INT_MIN, MINSPEED, 0); // was MAXSPEED
+      Serial.print(F("Reset/Retracting from ")); Serial.println(stepper.currentPosition());
+      move_to(INT_MIN, -MINSPEED, 0); // was MAXSPEED
     }
   }
+
+
 
   // running
   else
@@ -165,15 +192,23 @@ void move_to( int target, int speed, int stutter_delay ) {
   stepper.setSpeed( speed );
 
   if ( sgn(speed) != sgn(stepper.currentPosition() - target) ) {
-    Serial.print(F("Bad speed direction "));Serial.print(speed);
-    Serial.print(F(" delta-pos "));Serial.print( stepper.currentPosition() - target );
+    Serial.print(F("   direction ")); Serial.print(speed);
+    Serial.print(F(" delta-pos ")); Serial.print( stepper.currentPosition() - target );
     Serial.println();
     // will run off the "end" (one of the ends, oh well!)
-    }
+  }
 
   // ( "!= target" ought to be safe, as runSpeed() should only be able to take one step at a time )
-  while (!hit_limit() && isStarted && stepper.currentPosition() != target) 
+  while (!hit_limit() && !isReset && stepper.currentPosition() != target)
   {
+    /*
+      if (! ( stepper.currentPosition() % 10 ) ) {
+      Serial.print(stepper.currentPosition()); Serial.print(F("->")); Serial.print(target);
+      Serial.print(F(" +")); Serial.print(speed);
+      Serial.println();
+      }
+    */
+
     stepper.runSpeed(); // possibly take a step
     delay (randDelay); // may stutter
   }
