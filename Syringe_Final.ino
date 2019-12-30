@@ -1,11 +1,19 @@
 /*
-  Run a syringe in/out using the stepper.
+  Run a syringe in/out using the stepper, recognizes limit switches.
   Reset button: retract and halt
   Start button: start push/pull patterns
 
   Wiring: see associated fritzing
   Switches are momentary, normally-open, close to ground
 
+  On power-up, this should Retract to the limit switch,
+  Then push to the limit switch.
+  
+  The Reset button should retract.
+  
+  What to do if directions are backwards:
+  * Flip the "coils" of the wiring.
+  
 */
 
 #include <limits.h>
@@ -13,9 +21,35 @@
 #include <AccelStepper.h>
 
 // Wiring
-const int stepPin = 3;
-const int dirPin = 4;
-const int motorInterfaceType = 1;
+const int stepsPerRevolution = 40; // ##200; // for the stepper
+
+// You can use an Adafruit motorshield...
+#define StepAndDir 1 // Kurina's hardware: A step-pin, a dir-pin
+#define MotorShieldV2 2 // Testing with MotorShieldV2
+// Pick motor-controller: ##
+#define AccelType MotorShieldV2 
+
+
+#if AccelType == StepAndDir
+  // Kurina's hardware
+  AccelStepper stepper = AccelStepper(
+    AccelStepper::DRIVER, // 2 pin (set to pinmode OUTPUT automatically) :
+    3, // stepPin
+    4 // dirPin
+    );
+    
+#elif AccelType == MotorShieldV2
+  // for testing w/a motorshield
+  #include "AccelStepperMotorShield.h"
+  Adafruit_MotorShield syringeShield = Adafruit_MotorShield(); // shield #1
+
+  AccelStepperMotorShield stepper = AccelStepperMotorShield( // is a AccelStepper
+     syringeShield,
+     2 // stepper block #2
+     );
+#else
+  static_assert(false, "Expected the value of AccelType to have on an #elif block");
+#endif
 
 const int startPin = 5;
 const int resetPin = 2;
@@ -25,11 +59,12 @@ const int pushLimitPin = 7; // momentary limit switch, when syringe fully depres
 const int debounceInterval = 50;
 
 //////////////// variables to be modified as you wish later on /////////
-const int MAXSPEED = 7000;
-const int MINSPEED = 5000;
+const int MAXSPEED = 7000; // not actual AccelStepper speed, see the stutter-delay
+const int MINSPEED = 5000; 
+const int NonAnimatedSpeed = stepsPerRevolution; // * 3; // reasonable reset/find speed
 
 const int MINSTEP = 10;         // Smallest amount of motion each time
-const int MAXSTEP = 50 * 52;   //200 is a full rotation , 10 to make 10 rotations
+const int MAXSTEP = stepsPerRevolution * 13;   //200 is a full rotation , 10 to make 10 rotations
 
 const int MAXDELAY = 40;    // in ms . 2000 = 2 secs
 const int MINDELAY = 1;
@@ -41,7 +76,7 @@ int maxPosition = 2400;      // when syringe fully depressed. initial value is a
 Bounce startButton = Bounce();
 Bounce pushLimitButton = Bounce();
 Bounce retractLimitButton = Bounce();
-AccelStepper stepper = AccelStepper(motorInterfaceType, stepPin, dirPin);
+
 volatile bool isStarted = false;
 volatile bool isReset = false;
 int originalPos = 0;
@@ -58,15 +93,15 @@ template <typename T> int sgn(T val) {
 }
 
 void setup() {
+  Serial.begin(9600);
+  Serial.println(F("test, then Simplify, use accelstepper's position, moveto, etc."));
+
   pinMode(startPin, INPUT_PULLUP);
   pinMode(resetPin, INPUT_PULLUP);
   pinMode(retractLimitPin, INPUT_PULLUP);
   pinMode(pushLimitPin, INPUT_PULLUP);
 
   attachInterrupt(digitalPinToInterrupt(resetPin), ResetFunc, FALLING );
-
-  Serial.begin(9600);
-
 
   startButton.attach(startPin);
   startButton.interval(debounceInterval);
@@ -76,8 +111,9 @@ void setup() {
   retractLimitButton.attach(retractLimitPin);
   retractLimitButton.interval(debounceInterval);
 
-  pinMode (stepPin, OUTPUT);
-  pinMode (dirPin, OUTPUT);
+  #if AccelType == MotorShieldV2
+    stepper.begin(); // because you can't Adafruit_MotorShield.begin() in a constructor
+  #endif 
   stepper.setMaxSpeed(MAXSPEED);
 
   // stepper.currentPosition() starts at 0
@@ -87,20 +123,24 @@ void setup() {
   randomSeed(analogRead(0));
   stepsTaken = 0;
 
+  find_limits();
+
+  Serial.println(F("Waiting, press start."));
+}
+
+void find_limits() {
   // Figure out position limits
 
   // run to both ends, which also sets the distance
   // in this order, because we set min to 0
   Serial.println(F("Looking for min push limit..."));
   stepper.setCurrentPosition( INT_MAX ); // so we can retract
-  move_to( INT_MIN, MINSPEED, 0 ); // will figure out 0 for us, way farther negative than possible
+  move_to( INT_MIN, -NonAnimatedSpeed, 0 ); // will figure out 0 for us, way farther negative than possible
   Serial.print(F("min retract limit ")); Serial.println(stepper.currentPosition());
 
   Serial.println(F("Looking for max push limit..."));
-  move_to( INT_MAX, MINSPEED, 0 ); // will figure out maxPosition for us, way farther than possible
+  move_to( INT_MAX, NonAnimatedSpeed, 0 ); // will figure out maxPosition for us, way farther than possible
   Serial.print(F("max push limit ")); Serial.println(stepper.currentPosition());
-
-  Serial.println(F("Waiting, press start."));
 }
 
 void ResetFunc() {
@@ -152,7 +192,8 @@ void loop() {
 
       // retract
       Serial.print(F("Reset/Retracting from ")); Serial.println(stepper.currentPosition());
-      move_to(INT_MIN, -MINSPEED, 0); // was MAXSPEED
+      Serial.print(F("To "));Serial.println(INT_MIN);
+      move_to(INT_MIN, -NonAnimatedSpeed, 0);
     }
   }
 
@@ -191,7 +232,7 @@ void move_to( int target, int speed, int stutter_delay ) {
 
   stepper.setSpeed( speed );
 
-  if ( sgn(speed) != sgn(stepper.currentPosition() - target) ) {
+  if ( sgn(speed) != sgn(target - stepper.currentPosition()) ) {
     Serial.print(F("   direction ")); Serial.print(speed);
     Serial.print(F(" delta-pos ")); Serial.print( stepper.currentPosition() - target );
     Serial.println();
