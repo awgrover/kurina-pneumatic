@@ -6,6 +6,14 @@
   Wiring: see associated fritzing
   Switches are momentary, normally-open, close to ground
 
+  On power-up, this should Retract to the limit switch,
+  Then push to the limit switch.
+  
+  The Reset button should retract.
+  
+  What to do if directions are backwards:
+  * Flip the "coils" of the wiring.
+  
 */
 
 #include <limits.h>
@@ -51,8 +59,9 @@ const int pushLimitPin = 7; // momentary limit switch, when syringe fully depres
 const int debounceInterval = 50;
 
 //////////////// variables to be modified as you wish later on /////////
-const int MAXSPEED = 7000; // not actual AccelStepper speed, see the jitter-delay
+const int MAXSPEED = 7000; // not actual AccelStepper speed, see the stutter-delay
 const int MINSPEED = 5000; 
+const int NonAnimatedSpeed = stepsPerRevolution; // * 3; // reasonable reset/find speed
 
 const int MINSTEP = 10;         // Smallest amount of motion each time
 const int MAXSTEP = stepsPerRevolution * 13;   //200 is a full rotation , 10 to make 10 rotations
@@ -126,11 +135,11 @@ void find_limits() {
   // in this order, because we set min to 0
   Serial.println(F("Looking for min push limit..."));
   stepper.setCurrentPosition( INT_MAX ); // so we can retract
-  move_to( INT_MIN, stepsPerRevolution * 3, 0 ); // will figure out 0 for us, way farther negative than possible
+  move_to( INT_MIN, -NonAnimatedSpeed, 0 ); // will figure out 0 for us, way farther negative than possible
   Serial.print(F("min retract limit ")); Serial.println(stepper.currentPosition());
 
   Serial.println(F("Looking for max push limit..."));
-  move_to( INT_MAX, stepsPerRevolution * 3, 0 ); // will figure out maxPosition for us, way farther than possible
+  move_to( INT_MAX, NonAnimatedSpeed, 0 ); // will figure out maxPosition for us, way farther than possible
   Serial.print(F("max push limit ")); Serial.println(stepper.currentPosition());
 }
 
@@ -183,7 +192,8 @@ void loop() {
 
       // retract
       Serial.print(F("Reset/Retracting from ")); Serial.println(stepper.currentPosition());
-      move_to(INT_MIN, -MINSPEED, 0); // was MAXSPEED
+      Serial.print(F("To "));Serial.println(INT_MIN);
+      move_to(INT_MIN, -NonAnimatedSpeed, 0);
     }
   }
 
@@ -222,7 +232,7 @@ void move_to( int target, int speed, int stutter_delay ) {
 
   stepper.setSpeed( speed );
 
-  if ( sgn(speed) != sgn(stepper.currentPosition() - target) ) {
+  if ( sgn(speed) != sgn(target - stepper.currentPosition()) ) {
     Serial.print(F("   direction ")); Serial.print(speed);
     Serial.print(F(" delta-pos ")); Serial.print( stepper.currentPosition() - target );
     Serial.println();
