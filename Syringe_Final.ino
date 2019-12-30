@@ -1,5 +1,5 @@
 /*
-  Run a syringe in/out using the stepper.
+  Run a syringe in/out using the stepper, recognizes limit switches.
   Reset button: retract and halt
   Start button: start push/pull patterns
 
