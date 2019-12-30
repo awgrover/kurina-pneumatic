@@ -13,9 +13,34 @@
 #include <AccelStepper.h>
 
 // Wiring
-const int stepPin = 3;
-const int dirPin = 4;
-const int motorInterfaceType = 1;
+const int stepsPerRevolution = 200; // for the stepper
+
+#define StepAndDir 1 // Kurina's hardware: A step-pin, a dir-pin
+#define MotorShieldV2 2 // Testing with MotorShieldV2
+#define AccelType StepAndDir // Pick motor-controller
+
+
+#if AccelType == StepAndDir
+  // Kurina's hardward
+  AccelStepper stepper = AccelStepper(
+    AccelStepper::DRIVER, // 2 pin (set to pinmode OUTPUT automatically) :
+    3, // stepPin
+    4 // dirPin
+    );
+    
+#elif AccelType == MotorShieldV2
+  // for testing w/a motorshield
+  #include "AccelStepperMotorShield.h"
+  Adafruit_MotorShield syringShield = Adafruit_MotorShield(); // shield #1
+
+  AccelStepper stepper = (AccelStepper) AccelStepperMotorShield( 
+     syringShield,
+     2 // stepper block #2
+     );
+#else
+  static_assert(false, "Expected the value of AccelType to have on an #elif block");
+#endif
+
 
 const int startPin = 5;
 const int resetPin = 2;
@@ -29,7 +54,7 @@ const int MAXSPEED = 7000;
 const int MINSPEED = 5000;
 
 const int MINSTEP = 10;         // Smallest amount of motion each time
-const int MAXSTEP = 50 * 52;   //200 is a full rotation , 10 to make 10 rotations
+const int MAXSTEP = stepsPerRevolution * 13;   //200 is a full rotation , 10 to make 10 rotations
 
 const int MAXDELAY = 40;    // in ms . 2000 = 2 secs
 const int MINDELAY = 1;
@@ -41,7 +66,7 @@ int maxPosition = 2400;      // when syringe fully depressed. initial value is a
 Bounce startButton = Bounce();
 Bounce pushLimitButton = Bounce();
 Bounce retractLimitButton = Bounce();
-AccelStepper stepper = AccelStepper(motorInterfaceType, stepPin, dirPin);
+
 volatile bool isStarted = false;
 volatile bool isReset = false;
 int originalPos = 0;
@@ -67,7 +92,6 @@ void setup() {
 
   Serial.begin(9600);
 
-
   startButton.attach(startPin);
   startButton.interval(debounceInterval);
 
@@ -75,9 +99,7 @@ void setup() {
   startButton.interval(debounceInterval);
   retractLimitButton.attach(retractLimitPin);
   retractLimitButton.interval(debounceInterval);
-
-  pinMode (stepPin, OUTPUT);
-  pinMode (dirPin, OUTPUT);
+  
   stepper.setMaxSpeed(MAXSPEED);
 
   // stepper.currentPosition() starts at 0
