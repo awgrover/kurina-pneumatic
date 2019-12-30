@@ -21,11 +21,12 @@
 #include <AccelStepper.h>
 
 // Wiring
-const int stepsPerRevolution = 40; // 200; // for the stepper
+const int stepsPerRevolution = 40; // ##200; // for the stepper
 
+// You can use an Adafruit motorshield...
 #define StepAndDir 1 // Kurina's hardware: A step-pin, a dir-pin
 #define MotorShieldV2 2 // Testing with MotorShieldV2
-// Pick motor-controller:
+// Pick motor-controller: ##
 #define AccelType MotorShieldV2 
 
 
@@ -49,7 +50,6 @@ const int stepsPerRevolution = 40; // 200; // for the stepper
 #else
   static_assert(false, "Expected the value of AccelType to have on an #elif block");
 #endif
-
 
 const int startPin = 5;
 const int resetPin = 2;
