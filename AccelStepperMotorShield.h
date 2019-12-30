@@ -15,11 +15,12 @@ class AccelStepperMotorShield : public AccelStepper {
   public:
   Adafruit_StepperMotor *stepperBlock;
   Adafruit_MotorShield &shield;
-     
+  int step_style; // e.g. SINGLE MICROSTEP   
   static void dumy() {} // nop
   
-  AccelStepperMotorShield(Adafruit_MotorShield &shield, const int stepperBlock)
+  AccelStepperMotorShield(Adafruit_MotorShield &shield, const int stepperBlock, const int step_style=SINGLE)
     : shield(shield),
+    step_style(step_style),
     stepperBlock(shield.getStepper(200, stepperBlock)), // step/rev is not relevant
     // we can't use .forward and .backward 
     // because we can't construct a function pointer for them
@@ -31,11 +32,15 @@ class AccelStepperMotorShield : public AccelStepper {
   void begin() {
     shield.begin();
     }
-    
+
+  void set_step_style(int step_style) {
+    // update it
+    this->step_style = step_style;
+  }
   void step(long step) {
     // we know we are only doing forward/backward, so just do it
-    if (speed() > 0) stepperBlock->onestep(FORWARD, SINGLE);
-    else stepperBlock->onestep(BACKWARD, SINGLE);
+    if (speed() > 0) stepperBlock->onestep(FORWARD, step_style);
+    else stepperBlock->onestep(BACKWARD, step_style);
   }
   void disableOutputs() { stepperBlock->release(); } // translates to "free spin"
 

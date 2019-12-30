@@ -13,7 +13,19 @@
   
   What to do if directions are backwards:
   * Flip the "coils" of the wiring.
-  
+
+  accelstepper:
+    setSpeed() and runSpeed(), no accel, just step @ speed
+    runSpeedToPosition() does not work right   
+    setMaxSpeed(), moveTo(), setAcceleration() and run(), step to target w/accel
+    runTo* blocking steps till
+
+    was
+    speed max 7000 at 1ms delay = 1000
+      actually, anything over about 1000 (delay <= 7) would stutter
+      she liked the stutter
+    speed min 5000, at 40 = ~ 125
+    switch to microstepping if speed < 125
 */
 
 #include <limits.h>
@@ -21,7 +33,8 @@
 #include <AccelStepper.h>
 
 // Wiring
-const int stepsPerRevolution = 40; // ##200; // for the stepper
+//const int stepsPerRevolution = 200; // for the stepper
+const int stepsPerRevolution = 20; // ## alan's test
 
 // You can use an Adafruit motorshield...
 #define StepAndDir 1 // Kurina's hardware: A step-pin, a dir-pin
@@ -59,15 +72,12 @@ const int pushLimitPin = 7; // momentary limit switch, when syringe fully depres
 const int debounceInterval = 50;
 
 //////////////// variables to be modified as you wish later on /////////
-const int MAXSPEED = 7000; // not actual AccelStepper speed, see the stutter-delay
-const int MINSPEED = 5000; 
-const int NonAnimatedSpeed = stepsPerRevolution; // * 3; // reasonable reset/find speed
+const int MAXSPEED = stepsPerRevolution * 5; // i.e. 5 rev/sec
+const int MINSPEED = stepsPerRevolution * .6; 
+const int NonAnimatedSpeed = stepsPerRevolution * 2; // reasonable reset/find speed
 
-const int MINSTEP = 10;         // Smallest amount of motion each time
+const int MINSTEP = stepsPerRevolution / 20;         // Smallest amount of motion each time
 const int MAXSTEP = stepsPerRevolution * 13;   //200 is a full rotation , 10 to make 10 rotations
-
-const int MAXDELAY = 40;    // in ms . 2000 = 2 secs
-const int MINDELAY = 1;
 
 int maxPosition = 2400;      // when syringe fully depressed. initial value is a guess. automatically updated by limit switch
 
@@ -82,7 +92,6 @@ volatile bool isReset = false;
 int originalPos = 0;
 int dir = 1;
 long randSteps;
-long randDelay;
 long randSpeed;
 long randDir = 0;
 volatile int stepsTaken ;
@@ -135,11 +144,11 @@ void find_limits() {
   // in this order, because we set min to 0
   Serial.println(F("Looking for min push limit..."));
   stepper.setCurrentPosition( INT_MAX ); // so we can retract
-  move_to( INT_MIN, -NonAnimatedSpeed, 0 ); // will figure out 0 for us, way farther negative than possible
+  move_to( INT_MIN, -NonAnimatedSpeed); // will figure out 0 for us, way farther negative than possible
   Serial.print(F("min retract limit ")); Serial.println(stepper.currentPosition());
 
   Serial.println(F("Looking for max push limit..."));
-  move_to( INT_MAX, NonAnimatedSpeed, 0 ); // will figure out maxPosition for us, way farther than possible
+  move_to( INT_MAX, NonAnimatedSpeed); // will figure out maxPosition for us, way farther than possible
   Serial.print(F("max push limit ")); Serial.println(stepper.currentPosition());
 }
 
@@ -193,41 +202,45 @@ void loop() {
       // retract
       Serial.print(F("Reset/Retracting from ")); Serial.println(stepper.currentPosition());
       Serial.print(F("To "));Serial.println(INT_MIN);
-      move_to(INT_MIN, -NonAnimatedSpeed, 0);
+      move_to(INT_MIN, -NonAnimatedSpeed);
     }
   }
-
-
 
   // running
   else
   {
     // wants some variability
-    randDelay = random(MINDELAY, MAXDELAY); // stutter possibly
+
+
+    // FIXME: "either moveto something, or spasm";
+    
     randSpeed = random(MINSPEED, MAXSPEED);
 
     // decide which way to go, how far, and how fast
-    // We want a big step (between MINSTEP & MAXSTEP),
+    // We want a big distance (between MINSTEP & MAXSTEP),
     // tending towards push (3/4 of the time)
     int target;
-    do {
-      // guess a distance and direction...
-      randSteps = random(MINSTEP, MAXSTEP ); // the goal distance
-      randDir = random(-1, 2); // -1=retract, 0,1=push x1, 2=push x2
-      if (randDir == 0) randDir++;
-      // try again if that would retract too far (<originalPos)
-      // or push too far (>maxPosition)
-      target = stepper.currentPosition() + randSteps * randDir;
-    } while ( target < 0 || target > (maxPosition + 100) ); // "+100" so it reliably hits the end even w/slippage
+    
+    // guess a distance and direction...
+    randSteps = random(MINSTEP, MAXSTEP ); // the goal distance
+    randDir = random(-1, 2); // -1=retract, 0,1=push x1, 2=push x2
+    if (randDir == 0) randDir++;
+    // try again if that would retract too far (<originalPos)
+    // or push too far (>maxPosition)
+    target = stepper.currentPosition() + randSteps * randDir;
+    target = constrain( target, -stepsPerRevolution/4, maxPosition + (stepsPerRevolution/4) );// "+/-" so it reliably hits the end even w/slippage
 
-    move_to( target, randSpeed * sgn(randDir), randDelay );
+    // it might be possible to smooth out slow speeds with microsteps
+    // you'd have to multiple the distance and speed by number-of-microsteps
+    // but only when the randSpeed < 1000/microsteps
+    
+    move_to( target, randSpeed * sgn(randDir));
   }
 
 }
 
-void move_to( int target, int speed, int stutter_delay ) {
+void move_to( int target, int speed ) {
   // run the motor to the target, watching for reset, limits, etc.
-  // stutter_delay is meant to introduce stuttering while running
   // remember, a "reset" could during here too
 
   stepper.setSpeed( speed );
@@ -251,6 +264,6 @@ void move_to( int target, int speed, int stutter_delay ) {
     */
 
     stepper.runSpeed(); // possibly take a step
-    delay (randDelay); // may stutter
+
   }
 }
